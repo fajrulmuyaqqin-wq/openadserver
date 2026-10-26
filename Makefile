@@ -1,60 +1,72 @@
-# LiteAds Makefile
-# Common commands for development and deployment
+# OpenAdServer (LiteAds Rust Rewrite) Makefile
+# High-performance computational advertising system in Rust
 
-.PHONY: help install dev test lint format clean docker-up docker-down docker-logs
+.PHONY: help build check dev test test-fast fmt clean docker-up docker-down docker-logs docker-build db-init db-mock health benchmark
 
 # Default target
 help:
-	@echo "LiteAds - Makefile Commands"
+	@echo "OpenAdServer (Rust) - Makefile Commands"
 	@echo ""
-	@echo "Development:"
-	@echo "  make install     Install dependencies"
-	@echo "  make dev         Run development server"
-	@echo "  make test        Run tests"
-	@echo "  make lint        Run linting"
-	@echo "  make format      Format code"
+	@echo "Rust Development:"
+	@echo "  make check       Verify compilation without code generation"
+	@echo "  make build       Compile release binary (target/release/openadserver)"
+	@echo "  make dev         Run ad server locally in development mode"
+	@echo "  make test        Run all unit & integration tests"
+	@echo "  make fmt         Format Rust code with rustfmt"
+	@echo "  make clean       Clean cargo target artifacts"
 	@echo ""
-	@echo "Docker:"
-	@echo "  make docker-up   Start all services"
-	@echo "  make docker-down Stop all services"
-	@echo "  make docker-logs View service logs"
-	@echo "  make docker-build Build Docker images"
+	@echo "Database & Mocking:"
+	@echo "  make db-init     Initialize schema and default tables"
+	@echo "  make db-mock     Seed database with realistic mock ad campaigns"
 	@echo ""
-	@echo "Database:"
-	@echo "  make db-init     Initialize database"
-	@echo "  make db-migrate  Run migrations"
-	@echo "  make db-mock     Generate mock data"
+	@echo "Docker & Compose:"
+	@echo "  make docker-up   Start postgres, redis, and ad-server containers"
+	@echo "  make docker-down Stop all containers"
+	@echo "  make docker-build Build Rust multi-stage Docker container"
+	@echo "  make docker-logs Follow container logs"
 	@echo ""
-	@echo "Utilities:"
-	@echo "  make clean       Clean build artifacts"
-	@echo "  make benchmark   Run performance benchmark"
+	@echo "Observability & Benchmarks:"
+	@echo "  make health      Check server /health endpoint"
+	@echo "  make metrics     Fetch Prometheus /metrics"
+	@echo "  make benchmark   Run high-throughput HTTP benchmark"
 
 # =============================================================================
-# Development
+# Rust Development
 # =============================================================================
 
-install:
-	pip install -e ".[dev]"
+check:
+	cargo check
+
+build:
+	cargo build --release
 
 dev:
-	LITEADS_ENV=dev python -m liteads.ad_server.main
+	RUST_LOG=info cargo run -- serve
 
 test:
-	pytest tests/ -v --cov=liteads --cov-report=term-missing
+	cargo test
 
 test-fast:
-	pytest tests/ -v -x --tb=short
+	cargo test -- --nocapture
 
-lint:
-	ruff check liteads tests
-	mypy liteads --ignore-missing-imports
+fmt:
+	cargo fmt
 
-format:
-	ruff format liteads tests
-	ruff check --fix liteads tests
+clean:
+	cargo clean
 
 # =============================================================================
-# Docker
+# Database & Mock Data
+# =============================================================================
+
+db-init:
+	cargo run -- init-db
+
+db-mock:
+	cargo run -- mock-data
+
+# =============================================================================
+# Docker & Deployment
 # =============================================================================
 
 docker-up:
@@ -75,78 +87,16 @@ docker-build:
 docker-restart:
 	docker compose restart ad-server
 
-docker-scale:
-	docker compose up -d --scale ad-server=3
-
 # =============================================================================
-# Database
+# Observability & Testing
 # =============================================================================
-
-db-init:
-	docker compose up -d postgres
-	@echo "Waiting for PostgreSQL to start..."
-	@sleep 5
-	docker compose exec postgres psql -U liteads -d liteads -f /docker-entrypoint-initdb.d/init.sql
-
-db-migrate:
-	alembic upgrade head
-
-db-mock:
-	python scripts/generate_mock_data.py --advertisers 10 --campaigns 5 --creatives 3
-
-db-shell:
-	docker compose exec postgres psql -U liteads -d liteads
-
-# =============================================================================
-# Redis
-# =============================================================================
-
-redis-cli:
-	docker compose exec redis redis-cli
-
-redis-flush:
-	docker compose exec redis redis-cli FLUSHALL
-
-# =============================================================================
-# Utilities
-# =============================================================================
-
-clean:
-	rm -rf build/
-	rm -rf dist/
-	rm -rf *.egg-info/
-	rm -rf .pytest_cache/
-	rm -rf .ruff_cache/
-	rm -rf .mypy_cache/
-	rm -rf __pycache__/
-	find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
-	find . -type f -name "*.pyc" -delete
-
-benchmark:
-	@echo "Running benchmark with wrk..."
-	@echo "Make sure wrk is installed: brew install wrk"
-	wrk -t4 -c100 -d30s -s scripts/benchmark.lua http://localhost:8000/api/v1/ad/request
 
 health:
-	curl -s http://localhost:8000/health | python -m json.tool
+	@curl -s http://localhost:8000/health | jq . || curl -s http://localhost:8000/health
 
-api-docs:
-	@echo "API documentation available at:"
-	@echo "  Swagger UI: http://localhost:8000/docs"
-	@echo "  ReDoc:      http://localhost:8000/redoc"
+metrics:
+	@curl -s http://localhost:8000/metrics
 
-# =============================================================================
-# Production
-# =============================================================================
-
-prod-deploy:
-	docker compose --profile production up -d --build
-
-prod-logs:
-	docker compose logs -f --tail=100
-
-prod-status:
-	docker compose ps
-	@echo ""
-	@echo "Health check:"
-	@curl -s http://localhost/health | python -m json.tool || echo "Service not responding"
+benchmark:
+	@echo "Running benchmark against Rust OpenAdServer..."
+	@wrk -t8 -c200 -d30s -s scripts/benchmark.lua http://localhost:8000/api/v1/ad/request || echo "wrk not found, install via package manager"

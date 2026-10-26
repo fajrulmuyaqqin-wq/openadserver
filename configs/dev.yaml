@@ -9,7 +9,7 @@ server:
 
 database:
   host: "localhost"
-  port: 5432
+  port: 5435
   name: "liteads"
   user: "liteads"
   password: "liteads_password"

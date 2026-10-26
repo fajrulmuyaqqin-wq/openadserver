@@ -1,55 +1,53 @@
-# LiteAds Ad Server Dockerfile
-# Multi-stage build for smaller image size
+# OpenAdServer Rust Dockerfile
+# Multi-stage build for ultra-compact, high-performance binary container
 
 # Build stage
-FROM python:3.11-slim as builder
+FROM rust:1-slim-bookworm AS builder
 
-WORKDIR /app
+WORKDIR /usr/src/openadserver
 
 # Install build dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    curl \
+    pkg-config \
+    libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy source code for building wheel
-COPY pyproject.toml ./
-COPY liteads ./liteads
+# Copy dependency specifications for layer caching
+COPY Cargo.toml Cargo.lock* ./
+RUN mkdir src && echo "fn main() {}" > src/main.rs && echo "" > src/lib.rs
+RUN cargo build --release || true
+RUN rm -rf src
 
-# Build wheel
-RUN pip install --no-cache-dir build hatchling && \
-    pip wheel --no-cache-dir --wheel-dir=/app/wheels .
+# Copy actual source files and configuration
+COPY src ./src
+COPY configs ./configs
+
+# Build optimized production release binary
+RUN touch src/main.rs src/lib.rs && cargo build --release
 
 # Runtime stage
-FROM python:3.11-slim as runtime
+FROM debian:bookworm-slim AS runtime
 
 WORKDIR /app
 
-# Install runtime dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
     curl \
     && rm -rf /var/lib/apt/lists/* \
-    && useradd --create-home --shell /bin/bash liteads
+    && useradd --create-home --shell /bin/bash openadserver
 
-# Copy wheels from builder
-COPY --from=builder /app/wheels /app/wheels
+# Copy compiled binary and configuration files
+COPY --from=builder /usr/src/openadserver/target/release/openadserver /app/openadserver
+COPY --from=builder /usr/src/openadserver/configs /app/configs
 
-# Install application
-RUN pip install --no-cache-dir /app/wheels/*.whl && \
-    rm -rf /app/wheels
+RUN chown -R openadserver:openadserver /app
 
-# Copy application code
-COPY --chown=liteads:liteads . .
+USER openadserver
 
-# Switch to non-root user
-USER liteads
-
-# Expose port
 EXPOSE 8000
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
-# Run the server
-CMD ["python", "-m", "liteads.ad_server.main"]
+ENTRYPOINT ["/app/openadserver"]
+CMD ["serve"]

@@ -1,3 +1,7 @@
+# Rust build artifacts
+target/
+**/*.rs.bk
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
@@ -121,8 +125,7 @@ credentials/
 
 # Data files
 
-# Documentation (except README)
-docs/*.md
+# Scripts documentation
 scripts/criteo/README*.md
 
 
